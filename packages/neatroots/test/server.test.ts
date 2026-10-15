@@ -213,7 +213,14 @@ describe("server", () => {
     const current: any = await client.callTool({ name: "get_current_run", arguments: {} });
     expect(current.isError).toBeFalsy();
     expect(text(current).run.trace_id).toBe(latest);
-    expect(text(await client.callTool({ name: "annotate", arguments: { label: "note", text: "x" } })).trace_id).toBe(latest);
+    expect(text(current).note).toBe(`The run in focus (${old.slice(0, 8)}…) was deleted; using the latest run.`);
+    // The stale focus is cleared once noted, so later calls just use the latest run.
+    expect(tb.roots.focus).toBeNull();
+    tb.roots.focus = { trace_id: old, span_id: null, at: Date.now() };
+    const ann = text(await client.callTool({ name: "annotate", arguments: { label: "note", text: "x" } }));
+    expect(ann.trace_id).toBe(latest);
+    expect(ann.note).toContain("was deleted; using the latest run");
+    expect(text(await client.callTool({ name: "get_run_outline", arguments: {} })).note).toBeUndefined();
     await client.close();
     // An id neatroots doesn't have is not taken as the focus.
     await call("/api/focus", { trace_id: hex(16) });
