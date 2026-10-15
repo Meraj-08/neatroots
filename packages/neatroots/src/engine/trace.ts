@@ -117,7 +117,9 @@ export function matchesSelector(s: SpanInfo, sel: SpanSelector | undefined): boo
   if (names && !names.includes(s.name.toLowerCase()) && !(s.toolName && names.includes(s.toolName.toLowerCase()))) return false;
   const tools = asList(sel.tool);
   if (tools && !(s.toolName && tools.includes(s.toolName.toLowerCase()))) return false;
-  if (sel.status && sel.status !== "any" && s.status !== sel.status) return false;
+  if (sel.status && sel.status !== "any") {
+    if (sel.status === "ok" ? s.status === "error" : s.status !== sel.status) return false;
+  }
   return true;
 }
 

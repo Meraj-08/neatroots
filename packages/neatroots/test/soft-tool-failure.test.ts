@@ -97,4 +97,23 @@ describe("soft-tool-failure", () => {
     st.ingest([batch([toolSpan(t, hex(8), "lookup", "{}", '{"error":"boom"}', "boom")])]);
     expect(evaluateRule(rule, loadTrace(st, t), false)).toBeNull();
   });
+
+  it("fires on failure-looking output when span status is unset (code 0)", () => {
+    const h = tmpHome();
+    homes.push(h);
+    const st = new Store(path.join(h, "data"));
+    const t = hex(16);
+    const sp = toolSpan(t, hex(8), "lookup", "{}", '{"error":"rate limit exceeded"}');
+    sp.status = { code: 0 };
+    st.ingest([batch([sp])]);
+    const hit = evaluateRule(rule, loadTrace(st, t), false);
+    expect(hit?.firing).toBe(true);
+
+    // Clean output with status code 0 stays quiet
+    const tClean = hex(16);
+    const spClean = toolSpan(tClean, hex(8), "lookup", "{}", '{"status":"ok","items":5}');
+    spClean.status = { code: 0 };
+    st.ingest([batch([spClean])]);
+    expect(evaluateRule(rule, loadTrace(st, tClean), false)).toBeNull();
+  });
 });
