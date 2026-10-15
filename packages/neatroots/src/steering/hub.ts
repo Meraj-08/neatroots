@@ -1,6 +1,7 @@
 import type { Roots } from "../core.js";
 import { projectSettings, type SteeringMode } from "../config.js";
 import type { Note } from "../types.js";
+import { isRule } from "../checks/types.js";
 import { log } from "../util/log.js";
 
 export interface SteerEvent {
@@ -27,6 +28,21 @@ export class SteeringHub {
     if (!this.roots.config.steering.enabled) return "off";
     if (!project) return "off";
     return projectSettings(this.roots.config, project).steering;
+  }
+
+  /** Whether one of the user's own halt rules applies to this run; those halt in every mode. */
+  canHalt(traceId: string): boolean {
+    const run = this.roots.store.getRun(traceId);
+    if (!run) return false;
+    const project = run.project ?? "unknown";
+    const workflow = run.workflow ?? project;
+    const list = (v: string | string[] | undefined) => (v === undefined ? undefined : Array.isArray(v) ? v : [v]);
+    return this.roots.checks.rules().some(({ check: c, source }) => {
+      if (!isRule(c) || c.action !== "halt" || (source !== "user" && source !== "project")) return false;
+      const projects = list(c.applies_to?.project);
+      const workflows = list(c.applies_to?.workflow);
+      return (!projects || projects.includes(project)) && (!workflows || workflows.includes(workflow));
+    });
   }
 
   subscribe(fn: Subscriber): () => void {

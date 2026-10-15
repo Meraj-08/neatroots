@@ -3,6 +3,7 @@ import zlib from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { parseChecks } from "../src/checks/registry.js";
 import { encodeTraceRequest, decodeTraceProtobuf } from "../src/otlp/codec.js";
 import { batch, hex, llmSpan, makeRoots, markerSpan, s, span, toolSpan, until } from "./helpers.js";
 
@@ -198,6 +199,33 @@ describe("server", () => {
     const tb = await served();
     const r = await fetch(`${tb.url}/api/steer/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trace_id: hex(16) }) });
     expect(await r.json()).toEqual({ mode: "unknown", known: false, note: null });
+  });
+
+  it("tells the hook when a user's halt rule applies to the run, so off mode keeps asking", async () => {
+    const tb = await served();
+    const t = hex(16);
+    tb.roots.ingest([batch([llmSpan(t, hex(8), { system: "sys", user: "Delete old orders" })])]);
+    const claim = async () => (await (await fetch(`${tb.url}/api/steer/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trace_id: t }) })).json()) as { mode: string; halts: boolean };
+    expect(await claim()).toMatchObject({ mode: "off", halts: false });
+    const [otherProject, here, advisory] = parseChecks(`
+- id: stop-deletes
+  kind: rule
+  action: halt
+  applies_to: { project: other-agent }
+  rule: { type: repeat, span: { tool: delete_records }, same: [tool, input], at_least: 3 }
+- id: stop-deletes-here
+  kind: rule
+  action: halt
+  rule: { type: repeat, span: { tool: delete_records }, same: [tool, input], at_least: 3 }
+- id: note-deletes
+  kind: rule
+  rule: { type: repeat, span: { tool: delete_records }, same: [tool, input], at_least: 3 }
+`).checks;
+    tb.roots.checks.save(otherProject, "user");
+    tb.roots.checks.save(advisory, "user");
+    expect((await claim()).halts).toBe(false);
+    tb.roots.checks.save(here, "user");
+    expect(await claim()).toMatchObject({ mode: "off", halts: true });
   });
 
   it("refuses retention values it can't use instead of answering ok and ignoring them", async () => {

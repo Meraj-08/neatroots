@@ -465,7 +465,8 @@ export function mountApi(app: Hono, roots: Roots): void {
     const mode = roots.steering.mode(run?.project ?? b.project);
     const wait = mode === "gate" ? (b.gate_ms ?? roots.config.steering.gateWaitMs) : 0;
     const note = wait > 0 ? await roots.steering.gate(b.trace_id, wait, b.span_id) : roots.steering.claim(b.trace_id, b.span_id);
-    return c.json({ mode, note: note ? { id: note.id, kind: note.kind, text: note.text, finding_id: note.finding_id } : null });
+    // halts tells a hook that caches "off" whether it must keep asking: a user's halt rule stops a run in any mode.
+    return c.json({ mode, halts: roots.steering.canHalt(b.trace_id), note: note ? { id: note.id, kind: note.kind, text: note.text, finding_id: note.finding_id } : null });
   });
 
   app.post("/api/steer/check", async (c) => {

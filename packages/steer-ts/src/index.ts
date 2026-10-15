@@ -57,6 +57,8 @@ interface State {
   mode: string;
   modeCheckedAt: number;
   modeTraceId?: string;
+  /** The server said a halt rule applies to modeTraceId's run, so "off" can't skip the claim. */
+  halts: boolean;
   downUntil: number;
   /** Requests in a row that timed out: neatroots is busy, not stopped, until there are a few. */
   timeouts: number;
@@ -67,6 +69,7 @@ const state: State = {
   disabled: typeof process !== "undefined" && ["0", "off", "false", "no"].includes(String(process.env.NEATROOTS_STEER ?? "").toLowerCase()),
   mode: "unknown",
   modeCheckedAt: 0,
+  halts: false,
   downUntil: 0,
   timeouts: 0,
 };
@@ -85,6 +88,7 @@ export function configure(opts: { url?: string; disabled?: boolean; traceId?: ()
   state.mode = "unknown";
   state.modeCheckedAt = 0;
   state.modeTraceId = undefined;
+  state.halts = false;
   state.downUntil = 0;
   state.timeouts = 0;
 }
@@ -233,17 +237,19 @@ export async function guidance(traceId?: string): Promise<Note | undefined> {
   }
   // A cached mode belongs only to the trace that supplied it. New runs must flush and ask.
   const mode = state.modeTraceId === traceId ? state.mode : "unknown";
-  if (mode === "off" && Date.now() - state.modeCheckedAt < 10_000) return undefined;
+  // Off is cached for 10 s, unless one of the user's halt rules applies: neatroots sends those in every mode.
+  if (mode === "off" && !state.halts && Date.now() - state.modeCheckedAt < 10_000) return undefined;
   let gateMs: number | undefined;
   if (mode === "gate" || mode === "unknown") {
     await flushSdk();
     gateMs = 300;
   }
-  const res = await post<{ mode: string; note: Note | null }>("/api/steer/claim", { trace_id: traceId, span_id: spanId, gate_ms: gateMs }, gateMs ? gateMs + 500 : 500);
+  const res = await post<{ mode: string; halts?: boolean; note: Note | null }>("/api/steer/claim", { trace_id: traceId, span_id: spanId, gate_ms: gateMs }, gateMs ? gateMs + 500 : 500);
   if (!res) return undefined;
   state.mode = res.mode || "unknown";
   state.modeCheckedAt = Date.now();
   state.modeTraceId = traceId;
+  state.halts = res.halts === true;
   if (!res.note) return undefined;
   await record(res.note);
   if (res.note.kind === "halt") throw new NeatrootsHalt(res.note.text);
