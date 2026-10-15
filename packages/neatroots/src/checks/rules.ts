@@ -33,9 +33,10 @@ function clip(s: string, n = 120): string {
 /**
  * Evaluates one rule against a trace. Returns null when the rule has never held in this
  * trace; otherwise `firing` says whether it still holds for the newest spans, which is how
- * a finding later resolves.
+ * a finding later resolves. `fresh` names the spans that just arrived: a streak they complete
+ * fires even if a later span in the same batch already ended it.
  */
-export function evaluateRule(check: RuleCheck, t: TraceSnapshot, atEnd: boolean): RuleHit | null {
+export function evaluateRule(check: RuleCheck, t: TraceSnapshot, atEnd: boolean, fresh?: ReadonlySet<string>): RuleHit | null {
   const r = check.rule;
   switch (r.type) {
     case "repeat": {
@@ -53,8 +54,15 @@ export function evaluateRule(check: RuleCheck, t: TraceSnapshot, atEnd: boolean)
       if (!worst) return null;
       const last = spans[spans.length - 1];
       const lastGroup = groups.get(keyOf(last, r.same))!;
-      const firing = lastGroup.length >= r.at_least;
-      const g = firing ? lastGroup : worst;
+      let now = lastGroup.length >= r.at_least ? lastGroup : undefined;
+      if (!now && fresh) {
+        for (const g of groups.values()) {
+          const reached = g.length >= r.at_least && g.slice(r.at_least - 1).some((s) => fresh.has(s.id));
+          if (reached && (!now || g.length > now.length)) now = g;
+        }
+      }
+      const firing = !!now;
+      const g = now ?? worst;
       const s0 = g[0];
       return {
         firing,
@@ -71,15 +79,17 @@ export function evaluateRule(check: RuleCheck, t: TraceSnapshot, atEnd: boolean)
       const spans = selectSpans(t.spans, r.span).sort((a, b) => a.endMs - b.endMs);
       let best: SpanInfo[] = [];
       let cur: SpanInfo[] = [];
+      let reached: SpanInfo[] | undefined;
       for (const s of spans) {
         if (s.status === "error") {
           cur.push(s);
           if (cur.length > best.length) best = [...cur];
+          if (cur.length >= r.consecutive && fresh?.has(s.id)) reached = [...cur];
         } else cur = [];
       }
       if (best.length < r.consecutive) return null;
-      const firing = cur.length >= r.consecutive;
-      const g = firing ? cur : best;
+      const firing = cur.length >= r.consecutive || !!reached;
+      const g = cur.length >= r.consecutive ? cur : (reached ?? best);
       const last = g[g.length - 1];
       return {
         firing,

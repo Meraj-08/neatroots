@@ -271,7 +271,7 @@ export class Engine {
   private async handleSpans(run: LiveRun, spanIds: string[]): Promise<void> {
     const snap = loadTrace(this.roots.store, run.traceId);
     const fresh = snap.spans.filter((s) => spanIds.includes(s.id));
-    this.applyRules(run, snap, false);
+    this.applyRules(run, snap, false, new Set(spanIds));
     this.ensurePlan(run, snap);
     for (const s of fresh) if ((s.kind === "TOOL" || s.kind === "MCP_TOOL") && !run.answered?.toolSpans.has(s.id)) void this.track(run.traceId, this.labelTool(run, s, snap));
     if (run.plan) this.scheduleQuestions(run, snap, fresh);
@@ -342,14 +342,14 @@ export class Engine {
 
   // ----------------------------------------------------------------- rules
 
-  private applyRules(run: LiveRun, snap: TraceSnapshot, atEnd: boolean): void {
+  private applyRules(run: LiveRun, snap: TraceSnapshot, atEnd: boolean, fresh?: ReadonlySet<string>): void {
     for (const lc of this.registry.rules()) {
       const rule = lc.check as RuleCheck;
       if (!this.appliesTo(rule, run)) continue;
       if (rule.rule.type === "run_end" && !atEnd) continue;
       let hit: RuleHit | null;
       try {
-        hit = evaluateRule(rule, snap, atEnd);
+        hit = evaluateRule(rule, snap, atEnd, fresh);
       } catch (err) {
         log.warn(`rule ${rule.id} failed: ${(err as Error).message}`);
         continue;
@@ -388,7 +388,8 @@ export class Engine {
 
   private resolve(f: Finding): void {
     const next = this.roots.store.updateFinding(f.id, { status: "resolved" });
-    this.steering.withdraw(f.id);
+    // The agent moving on doesn't undo a halt the user's rule asked for.
+    this.steering.withdraw(f.id, { keepHalts: true });
     if (next) this.roots.bus.emit("finding", next);
   }
 

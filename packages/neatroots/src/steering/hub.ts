@@ -92,12 +92,16 @@ export class SteeringHub {
     return next;
   }
 
-  /** Withdraws pending notes for a finding that resolved or was dismissed. */
-  withdraw(findingId: string): void {
+  /**
+   * Withdraws pending notes for a finding that resolved or was dismissed. `keepHalts` leaves
+   * halt notes queued: a halt still applies when the condition that raised it has passed.
+   */
+  withdraw(findingId: string, opts: { keepHalts?: boolean } = {}): void {
     const f = this.roots.store.getFinding(findingId);
     if (!f) return;
     for (const n of this.roots.store.notesForTrace(f.trace_id, "pending")) {
       if (n.finding_id !== findingId) continue;
+      if (opts.keepHalts && n.kind === "halt") continue;
       this.roots.store.updateNote(n.id, { status: "expired" });
       this.roots.bus.emit("note", { ...n, status: "expired" });
       this.broadcast({ event: "retract", data: { id: n.id, trace_id: n.trace_id } });
