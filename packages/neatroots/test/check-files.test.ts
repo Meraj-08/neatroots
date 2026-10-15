@@ -52,6 +52,17 @@ const write = (steps: Step[]) => {
 };
 
 describe("checkFiles", () => {
+  it("flags a loop or error streak the agent later moved on from", () => {
+    const loop = write([...same("search", 4), tool("summarize", true, '{"n":4}')]);
+    const errs = write([
+      tool("charge", false, '{"a":1}'), tool("refund", false, '{"a":2}'), tool("lookup", false, '{"a":3}'),
+      tool("charge", true, '{"a":4}'), tool("refund", true, '{"a":5}'), tool("lookup", true, '{"a":6}'),
+    ]);
+    const r = checkFiles([loop, errs]);
+    expect(r.runs[0].findings.map((f) => f.check_id)).toContain("repeated-tool-call");
+    expect(r.runs[1].findings.map((f) => f.check_id)).toContain("tool-error-streak");
+  });
+
   it("flags a bad run and passes a good one", () => {
     const r = checkFiles([write(BAD[0]), write(GOOD[0])]);
     expect(r.runs.map((x) => x.findings.length > 0)).toEqual([true, false]);
