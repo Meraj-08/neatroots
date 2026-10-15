@@ -178,6 +178,9 @@ describe("built-in credential formats", () => {
     ["aws secret key in json", `{"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}`, `{"aws_secret_access_key": "[redacted:aws_secret]"}`],
     ["url password", "postgres://admin:S3cretPass99@db.internal:5432/app", "postgres://admin:[redacted:url_password]@db.internal:5432/app"],
     ["url password, dotless host", "redis://default:S3cretPass99@db:6379", "redis://default:[redacted:url_password]@db:6379"],
+    ["url password, no user", "redis://:S3cretPass99@cache:6379", "redis://:[redacted:url_password]@cache:6379"],
+    ["basic auth after a lowercase header", "authorization: basic dXNlcjpzM2NyZXRQYXNzd29yZDEyMw==", "authorization: basic [redacted:basic_auth]"],
+    ["aws secret key longer than 40 characters", "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus4", "aws_secret_access_key=[redacted:aws_secret]"],
   ];
   const hostedLlm = BUILTIN_RULES.filter((r) => CREDENTIAL_KINDS.includes(r.kind));
 
@@ -193,8 +196,29 @@ describe("built-in credential formats", () => {
       "See https://example.com:8080/docs?page=2 and http://localhost:4100/runs",
       "run_id=hf_model sk_live is not configured; npm_install ran",
       "eyJhbGciOiJIUzI1NiJ9 alone is just a header",
+      "Use basic /usr/local/lib/python3.11/site-packages for the venv",
+      "Basic authentication1234 is enabled",
+      "Basic AuthenticationIsOn is not base64 either",
     ];
     for (const text of clean) expect(redactString(text, BUILTIN_RULES, "x", [])).toBe(text);
+  });
+
+  it("reads a port and a query as a port and a query, not a password", () => {
+    const url = "https://api.example.com:443?email=jane@corp.com";
+    expect(redactString(url, hostedLlm, "x", [])).toBe(url);
+    expect(redactString(url, BUILTIN_RULES, "x", [])).toBe("https://api.example.com:443?email=[redacted:email]");
+  });
+
+  it("stays fast on long adversarial input", () => {
+    // Before, url_password, jwt and email took seconds on these (a match tried from every word boundary).
+    const inputs = ["a.".repeat(50_000), "eyJ-".repeat(25_000), "a@".repeat(50_000), "a:a/".repeat(25_000), "Basic a".repeat(14_000), "x".repeat(100_000)];
+    for (const rule of BUILTIN_RULES) {
+      for (const text of inputs) {
+        const started = performance.now();
+        redactString(text, [rule], "x", []);
+        expect(performance.now() - started, `${rule.kind} on ${JSON.stringify(text.slice(0, 8))}…`).toBeLessThan(250);
+      }
+    }
   });
 
   it("never echoes the secret in the preview hits", () => {

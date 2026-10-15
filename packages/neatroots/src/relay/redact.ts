@@ -14,13 +14,20 @@ export const BUILTIN_RULES: RedactionRule[] = [
     re: /\b(sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{40,}|npm_[A-Za-z0-9]{36}|ya29\.[A-Za-z0-9_-]{20,})\b/g,
   },
   { kind: "bearer_token", re: /\b(Bearer\s+)[A-Za-z0-9._~+/-]{20,}=*/gi, keepPrefix: true },
-  { kind: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
-  // Base64 credentials hold a digit, + or /; "basic internationalization" is not one.
-  { kind: "basic_auth", re: /\b(Basic\s+)(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+/]{16,}={0,2}/gi, keepPrefix: true },
-  { kind: "aws_secret", re: /(aws_secret_access_key["']?\s*[=:]\s*["']?)[A-Za-z0-9/+]{40}/gi, keepPrefix: true },
-  // Before email, which would otherwise take "password@host" as an address (and miss it for a dotless host).
-  { kind: "url_password", re: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi, keepPrefix: true },
-  { kind: "email", re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
+  // Matches start only where the run of token characters starts (a lookbehind, not \b), so a long
+  // run of "a." or "eyJ-" is scanned once instead of from every word boundary.
+  { kind: "jwt", re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
+  // The header's scheme is "Basic" (or any case after "Authorization:"). The value is base64 of
+  // user:password, so it has upper and lower case letters and a digit, + or /, doesn't start with
+  // a path's "/", and is a whole token: "basic /usr/lib/python3.11" and "Basic authentication1234" aren't.
+  { kind: "basic_auth", re: /\b(Basic\s+)(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+][A-Za-z0-9+/]{15,}={0,2}(?![A-Za-z0-9+/_-])/g, keepPrefix: true },
+  { kind: "basic_auth", re: /\b(authorization["']?\s*[:=]\s*["']?basic\s+)(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+][A-Za-z0-9+/]{15,}={0,2}(?![A-Za-z0-9+/_-])/gi, keepPrefix: true },
+  // The whole value, so a longer one isn't left half visible.
+  { kind: "aws_secret", re: /(aws_secret_access_key["']?\s*[=:]\s*["']?)[A-Za-z0-9/+]{40,}/gi, keepPrefix: true },
+  // Before email, which would otherwise take "password@host" as an address (and miss it for a dotless
+  // host). ? and # can't appear unencoded in userinfo, so "host:443?email=a@b.com" is a port and a query.
+  { kind: "url_password", re: /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s:/@]*:)[^\s@/?#]+(?=@)/gi, keepPrefix: true },
+  { kind: "email", re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
   { kind: "phone", re: /(?<![\w.])\+?(?:\d{1,3}[\s.-])?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?![\w.])/g },
 ];
 

@@ -93,7 +93,7 @@ neatroots llm local                                    # back to this machine on
 You can also do this in the app under **Settings → Models**.
 
 - **Providers:** Anthropic, OpenAI, OpenRouter, Google Gemini, Groq, Mistral, Together AI, and any OpenAI-compatible server (`neatroots llm use custom --base-url https://…/v1 --model …`). `neatroots llm providers` lists them, and `neatroots llm models <provider>` lists a provider's models.
-- **What is sent:** when a hosted LLM is on, the run content each LLM task needs is sent to that provider. Keys, tokens and private keys are removed first. `--redact all` also removes emails and phone numbers, though that can stop the personal-data check from seeing a leak. Rules, stored runs and the app stay on your machine.
+- **What is sent:** when a hosted LLM is on, the run content each LLM task needs is sent to that provider. Credentials are removed first: API keys, bearer tokens, JWTs, `Basic` authorization, AWS secret keys, passwords in URLs and private keys (the full list is in [cloud.md](cloud.md)). `--redact all` also removes emails and phone numbers, though that can stop the personal-data check from seeing a leak. Rules, stored runs and the app stay on your machine.
 - **Fallback:** if the provider fails or has no key, neatroots falls back to the local LLM. Turn this off with `--no-fallback`.
 - **Cost:** neatroots asks the LLM a few questions per run while Laya is learning, and more when it investigates a problem. Pick a smaller model, such as `claude-haiku-5-5`, if your agent runs a lot.
 
