@@ -156,6 +156,8 @@ export class Engine {
         if (n <= 0) {
           this.jobs.delete(traceId);
           if (this.live.get(traceId)?.endHandled) this.progress.done(traceId);
+          // A debounced trace question still counts as pending; its flush wakes the waiters.
+          if (this.pending(traceId)) return;
           for (const fn of this.idleWaiters.get(traceId) ?? []) fn();
           this.idleWaiters.delete(traceId);
         } else this.jobs.set(traceId, n);
@@ -180,6 +182,8 @@ export class Engine {
         resolve(true);
       });
       this.idleWaiters.set(traceId, list);
+      const run = this.live.get(traceId);
+      if (run?.dirty.size) this.scheduleFlush(run);
     });
   }
 
@@ -297,10 +301,14 @@ export class Engine {
         run.dirty.add(check.id);
       }
     }
-    if (run.dirty.size) {
-      clearTimeout(run.debounce);
-      run.debounce = setTimeout(() => void this.track(run.traceId, this.flushDirty(run)), 300);
-    }
+    if (run.dirty.size) this.scheduleFlush(run);
+  }
+
+  /** Trace questions are debounced, unless a gate-mode claim is waiting on the run: then they run now. */
+  private scheduleFlush(run: LiveRun): void {
+    clearTimeout(run.debounce);
+    const delay = this.idleWaiters.has(run.traceId) ? 0 : 300;
+    run.debounce = setTimeout(() => void this.track(run.traceId, this.flushDirty(run)), delay);
   }
 
   /**
