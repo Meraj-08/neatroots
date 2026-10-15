@@ -208,6 +208,7 @@ export function mountApi(app: Hono, roots: Roots): void {
 
   app.delete("/api/runs/:traceId", (c) => {
     roots.store.deleteRun(c.req.param("traceId"));
+    if (roots.focus?.trace_id === c.req.param("traceId")) roots.focus = null;
     return c.json({ ok: true });
   });
 
@@ -486,7 +487,8 @@ export function mountApi(app: Hono, roots: Roots): void {
 
   app.post("/api/focus", async (c) => {
     const b = await body<{ trace_id?: string; span_id?: string | null }>(c);
-    roots.focus = b.trace_id ? { trace_id: b.trace_id, span_id: b.span_id ?? null, at: Date.now() } : null;
+    // A run neatroots doesn't have can't be in focus.
+    roots.focus = b.trace_id && roots.store.getRun(b.trace_id) ? { trace_id: b.trace_id, span_id: b.span_id ?? null, at: Date.now() } : null;
     return c.json({ ok: true });
   });
 

@@ -194,6 +194,32 @@ describe("server", () => {
     expect(page).toMatchObject({ total: 3, matching: 3 });
   });
 
+  it("MCP tools use the latest run once the run in focus is deleted", async () => {
+    const tb = await served();
+    const old = hex(16);
+    const latest = hex(16);
+    tb.roots.ingest([batch([llmSpan(old, hex(8), { system: "sys", user: "old run" })])]);
+    tb.roots.ingest([batch([llmSpan(latest, hex(8), { system: "sys", user: "latest run" })])]);
+    const call = (p: string, b?: unknown, method = "POST") => fetch(`${tb.url}${p}`, { method, headers: { "content-type": "application/json" }, body: b ? JSON.stringify(b) : undefined });
+    await call("/api/focus", { trace_id: old });
+    expect(tb.roots.focus?.trace_id).toBe(old);
+    await call(`/api/runs/${old}`, undefined, "DELETE");
+    expect(tb.roots.focus).toBeNull();
+    // A focus left behind some other way (retention, an agent chat) is ignored too.
+    tb.roots.focus = { trace_id: old, span_id: null, at: Date.now() };
+    const client = new Client({ name: "test", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${tb.url}/mcp`)));
+    const text = (r: any) => JSON.parse(r.content[0].text);
+    const current: any = await client.callTool({ name: "get_current_run", arguments: {} });
+    expect(current.isError).toBeFalsy();
+    expect(text(current).run.trace_id).toBe(latest);
+    expect(text(await client.callTool({ name: "annotate", arguments: { label: "note", text: "x" } })).trace_id).toBe(latest);
+    await client.close();
+    // An id neatroots doesn't have is not taken as the focus.
+    await call("/api/focus", { trace_id: hex(16) });
+    expect(tb.roots.focus).toBeNull();
+  });
+
   it("answers steering claims for unknown runs with mode unknown", async () => {
     const tb = await served();
     const r = await fetch(`${tb.url}/api/steer/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trace_id: hex(16) }) });

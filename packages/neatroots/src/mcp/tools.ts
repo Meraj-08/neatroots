@@ -44,7 +44,11 @@ export function resolveTrace(roots: Roots, id: string | undefined): string {
     if (rows.length > 1) throw new Error(`run id ${id} matches more than one run (${shortList(rows.map((r) => r.trace_id))}); use more characters`);
     throw new Error(`no run with id ${id}`);
   }
-  if (roots.focus) return roots.focus.trace_id;
+  if (roots.focus) {
+    // The run in focus may have been deleted since (by the user or by retention); then nothing is in focus.
+    if (roots.store.getRun(roots.focus.trace_id)) return roots.focus.trace_id;
+    roots.focus = null;
+  }
   const latest = roots.store.listRuns({ limit: 1 })[0];
   if (!latest) throw new Error(`neatroots has no runs yet. Point NEATLOGS_ENDPOINT at http://localhost:${roots.config.port} and run your agent.`);
   return latest.trace_id;
