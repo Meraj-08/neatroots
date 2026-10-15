@@ -440,6 +440,13 @@ export class Engine {
       if (err instanceof DecisionUnavailableError || err instanceof LlmUnavailableError) {
         if (!this.decisionDown) log.warn(`questions skipped: ${(err as Error).message}`);
         this.decisionDown = true;
+        // Not asked after all (a timeout or dropped connection lands here too): the next pass, at
+        // the latest the run's end, asks again instead of skipping it for good.
+        if (spanId) {
+          run.spanDone.delete(`${check.id}:${spanId}`);
+          const asked = run.spanAsked.get(check.id) ?? 0;
+          if (asked > 0) run.spanAsked.set(check.id, asked - 1);
+        } else run.traceEvidence.delete(check.id);
         return;
       }
       // A model error or timeout is a failed check, never a "no".
