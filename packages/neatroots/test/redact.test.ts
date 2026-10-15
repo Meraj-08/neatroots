@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeTraceProtobuf } from "../src/otlp/codec.js";
 import type { AnyValue, KeyValue } from "../src/otlp/types.js";
-import { BUILTIN_RULES, compileRules, redactBatches } from "../src/relay/redact.js";
+import { BUILTIN_RULES, compileRules, CREDENTIAL_KINDS, redactBatches, redactString } from "../src/relay/redact.js";
 import { batch, hex, makeRoots, s, span } from "./helpers.js";
 
 const KEY = "sk-proj-abcdefghij1234567890ABCDEFghij";
@@ -158,5 +158,50 @@ describe("redaction before a cloud send", () => {
     const { batches, hits } = redactBatches([b], BUILTIN_RULES);
     expect(batches[0].spans[0].name).toBe("lookup_order");
     expect(hits).toEqual([]);
+  });
+});
+
+describe("built-in credential formats", () => {
+  // Made-up values in each provider's real format.
+  const A = "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY";
+  const SECRETS: [string, string, string][] = [
+    ["github fine-grained token", `token github_pat_11ABCDEFG0${A}_${A}${A}`, "token [redacted:api_key]"],
+    ["stripe secret key", `stripe sk_live_${A}`, "stripe [redacted:api_key]"],
+    ["stripe restricted key", `stripe rk_test_${A}`, "stripe [redacted:api_key]"],
+    ["hugging face token", `HF_TOKEN=hf_${A}ab`, "HF_TOKEN=[redacted:api_key]"],
+    ["groq key", `GROQ_API_KEY=gsk_${A}${A}`, "GROQ_API_KEY=[redacted:api_key]"],
+    ["npm token", `_authToken=npm_${A}abcd`, "_authToken=[redacted:api_key]"],
+    ["google oauth token", `access ya29.${A}${A}`, "access [redacted:api_key]"],
+    ["jwt without Bearer", `"id_token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.${A}"`, `"id_token": "[redacted:jwt]"`],
+    ["basic auth", "Authorization: Basic dXNlcjpzM2NyZXRQYXNzd29yZDEyMw==", "Authorization: Basic [redacted:basic_auth]"],
+    ["aws secret key", "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "aws_secret_access_key = [redacted:aws_secret]"],
+    ["aws secret key in json", `{"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}`, `{"aws_secret_access_key": "[redacted:aws_secret]"}`],
+    ["url password", "postgres://admin:S3cretPass99@db.internal:5432/app", "postgres://admin:[redacted:url_password]@db.internal:5432/app"],
+    ["url password, dotless host", "redis://default:S3cretPass99@db:6379", "redis://default:[redacted:url_password]@db:6379"],
+  ];
+  const hostedLlm = BUILTIN_RULES.filter((r) => CREDENTIAL_KINDS.includes(r.kind));
+
+  it.each(SECRETS)("removes a %s before a cloud send and before a hosted LLM call", (_name, text, expected) => {
+    expect(redactString(text, BUILTIN_RULES, "x", [])).toBe(expected);
+    expect(redactString(text, hostedLlm, "x", [])).toBe(expected);
+  });
+
+  it("leaves ordinary text, ids and plain URLs alone", () => {
+    const clean = [
+      "The basic internationalization settings are fine.",
+      "trace 4bf92f3577b34da6a3ce929d0e0e4736 span 00f067aa0ba902b7",
+      "See https://example.com:8080/docs?page=2 and http://localhost:4100/runs",
+      "run_id=hf_model sk_live is not configured; npm_install ran",
+      "eyJhbGciOiJIUzI1NiJ9 alone is just a header",
+    ];
+    for (const text of clean) expect(redactString(text, BUILTIN_RULES, "x", [])).toBe(text);
+  });
+
+  it("never echoes the secret in the preview hits", () => {
+    const hits: { kind: string; where: string; sample: string }[] = [];
+    redactString("postgres://admin:S3cretPass99@db:5432 Basic dXNlcjpzM2NyZXRQYXNzd29yZDEyMw==", BUILTIN_RULES, "x", hits);
+    expect(hits.map((h) => h.kind)).toEqual(["basic_auth", "url_password"]);
+    expect(JSON.stringify(hits)).not.toContain("S3cretPass99");
+    expect(JSON.stringify(hits)).not.toContain("dXNlcjpzM2NyZXRQYXNzd29yZDEyMw");
   });
 });
