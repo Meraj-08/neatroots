@@ -180,6 +180,9 @@ describe("built-in credential formats", () => {
     ["url password, dotless host", "redis://default:S3cretPass99@db:6379", "redis://default:[redacted:url_password]@db:6379"],
     ["url password, no user", "redis://:S3cretPass99@cache:6379", "redis://:[redacted:url_password]@cache:6379"],
     ["basic auth after a lowercase header", "authorization: basic dXNlcjpzM2NyZXRQYXNzd29yZDEyMw==", "authorization: basic [redacted:basic_auth]"],
+    ["short basic auth after the header", "Authorization: Basic YWRtaW46YWRtaW4=", "Authorization: Basic [redacted:basic_auth]"],
+    ["json-escaped basic auth", String.raw`{\"Authorization\": \"Basic YWRtaW46YWRtaW4=\"}`, String.raw`{\"Authorization\": \"Basic [redacted:basic_auth]\"}`],
+    ["json-escaped aws secret key", String.raw`{\"aws_secret_access_key\": \"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"}`, String.raw`{\"aws_secret_access_key\": \"[redacted:aws_secret]\"}`],
     ["aws secret key longer than 40 characters", "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus4", "aws_secret_access_key=[redacted:aws_secret]"],
   ];
   const hostedLlm = BUILTIN_RULES.filter((r) => CREDENTIAL_KINDS.includes(r.kind));

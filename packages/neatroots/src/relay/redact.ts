@@ -21,9 +21,11 @@ export const BUILTIN_RULES: RedactionRule[] = [
   // user:password, so it has upper and lower case letters and a digit, + or /, doesn't start with
   // a path's "/", and is a whole token: "basic /usr/lib/python3.11" and "Basic authentication1234" aren't.
   { kind: "basic_auth", re: /\b(Basic\s+)(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+][A-Za-z0-9+/]{15,}={0,2}(?![A-Za-z0-9+/_-])/g, keepPrefix: true },
-  { kind: "basic_auth", re: /\b(authorization["']?\s*[:=]\s*["']?basic\s+)(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+][A-Za-z0-9+/]{15,}={0,2}(?![A-Za-z0-9+/_-])/gi, keepPrefix: true },
+  // Tied to the header, so any base64 token counts, even a short default like admin:admin. The
+  // quotes may be JSON-escaped (\") when the header sits inside a string attribute.
+  { kind: "basic_auth", re: /\b(authorization\\?["']?\s*[:=]\s*\\?["']?basic\s+)[A-Za-z0-9+][A-Za-z0-9+/]{3,}={0,2}(?![A-Za-z0-9+/_-])/gi, keepPrefix: true },
   // The whole value, so a longer one isn't left half visible.
-  { kind: "aws_secret", re: /(aws_secret_access_key["']?\s*[=:]\s*["']?)[A-Za-z0-9/+]{40,}/gi, keepPrefix: true },
+  { kind: "aws_secret", re: /(aws_secret_access_key\\?["']?\s*[=:]\s*\\?["']?)[A-Za-z0-9/+]{40,}/gi, keepPrefix: true },
   // Before email, which would otherwise take "password@host" as an address (and miss it for a dotless
   // host). ? and # can't appear unencoded in userinfo, so "host:443?email=a@b.com" is a port and a query.
   { kind: "url_password", re: /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s:/@]*:)[^\s@/?#]+(?=@)/gi, keepPrefix: true },
