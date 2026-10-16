@@ -69,6 +69,8 @@ interface LiveRun {
   spanQueue: Map<string, string[]>;
   spanBusy: Set<string>;
   spanAsked: Map<string, number>;
+  /** Per span-scope check: spans whose model call failed live; run end asks them once more. */
+  retrySpans: Map<string, Set<string>>;
   /** Per question: flags the second look turned down; after a few, the question stops raising. */
   rejected: Map<string, number>;
   traceEvidence: Map<string, string>;
@@ -214,6 +216,7 @@ export class Engine {
       spanQueue: new Map(),
       spanBusy: new Set(),
       spanAsked: new Map(),
+      retrySpans: new Map(),
       rejected: new Map(),
       traceEvidence: new Map(),
       dirty: new Set(),
@@ -340,6 +343,22 @@ export class Engine {
     }
   }
 
+  /** One more try for spans whose model call failed live, still within the slow-mode cap on attempts. */
+  private async retryFailedSpans(run: LiveRun, check: QuestionCheck, params: Record<string, string>): Promise<void> {
+    const retry = run.retrySpans.get(check.id);
+    if (!retry?.size) return;
+    run.retrySpans.delete(check.id);
+    const slow = await this.decisions.isSlow([toQuestion(check, params)]);
+    for (const spanId of retry) {
+      if (slow) {
+        const asked = run.spanAsked.get(check.id) ?? 0;
+        if (asked >= SLOW_SPAN_CHECKS_PER_RUN) break;
+        run.spanAsked.set(check.id, asked + 1);
+      }
+      await this.askSpan(run, check, params, spanId);
+    }
+  }
+
   private async flushDirty(run: LiveRun): Promise<void> {
     const ids = [...run.dirty];
     run.dirty.clear();
@@ -410,7 +429,13 @@ export class Engine {
     const span = snap.spans.find((s) => s.id === spanId);
     if (!span) return;
     const ev = buildEvidence(snap, check.evidence, { focus: span });
-    await this.decideAndApply(run, check, params, ev.text, ev.spanIds, snap, spanId);
+    const outcome = await this.decideAndApply(run, check, params, ev.text, ev.spanIds, snap, spanId);
+    // The model call failed (a timeout or dropped connection lands here too): run end tries once more.
+    if (outcome === "unavailable" && !run.endHandled) {
+      const retry = run.retrySpans.get(check.id) ?? new Set<string>();
+      retry.add(spanId);
+      run.retrySpans.set(check.id, retry);
+    }
   }
 
   private async askTrace(run: LiveRun, check: QuestionCheck, params: Record<string, string>, snap: TraceSnapshot): Promise<void> {
@@ -420,7 +445,9 @@ export class Engine {
     const key = ev.spanIds.join(",") + (check.evidence?.final_output ? `|${finalOutput(snap) ?? ""}` : "");
     if (run.traceEvidence.get(check.id) === key) return;
     run.traceEvidence.set(check.id, key);
-    await this.decideAndApply(run, check, params, ev.text, ev.spanIds, snap, null);
+    const outcome = await this.decideAndApply(run, check, params, ev.text, ev.spanIds, snap, null);
+    // Not asked after all, so the run-end pass asks again; unless an overlapping pass cached newer evidence.
+    if (outcome === "unavailable" && run.traceEvidence.get(check.id) === key) run.traceEvidence.delete(check.id);
   }
 
   private async decideAndApply(
@@ -431,7 +458,7 @@ export class Engine {
     spanIds: string[],
     snap: TraceSnapshot,
     spanId: string | null,
-  ): Promise<void> {
+  ): Promise<"unavailable" | void> {
     let result: DecisionResult;
     try {
       result = await this.decisions.decide(evidence, [toQuestion(check, params)]);
@@ -440,14 +467,7 @@ export class Engine {
       if (err instanceof DecisionUnavailableError || err instanceof LlmUnavailableError) {
         if (!this.decisionDown) log.warn(`questions skipped: ${(err as Error).message}`);
         this.decisionDown = true;
-        // Not asked after all (a timeout or dropped connection lands here too): the next pass, at
-        // the latest the run's end, asks again instead of skipping it for good.
-        if (spanId) {
-          run.spanDone.delete(`${check.id}:${spanId}`);
-          const asked = run.spanAsked.get(check.id) ?? 0;
-          if (asked > 0) run.spanAsked.set(check.id, asked - 1);
-        } else run.traceEvidence.delete(check.id);
-        return;
+        return "unavailable";
       }
       // A model error or timeout is a failed check, never a "no".
       const existing = this.roots.store.latestFindingFor(run.traceId, check.id);
@@ -949,6 +969,7 @@ ${library}`;
         }
         run.spanQueue.set(check.id, queue);
         await this.drainSpanQueue(run, check, params);
+        await this.retryFailedSpans(run, check, params);
       } else {
         await this.askTrace(run, check, params, snap);
       }
