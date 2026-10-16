@@ -126,12 +126,19 @@ export const EXPLORE_TOOLS = [
     readOnly: true,
     input: { session_id: z.string().optional(), trace_id: z.string().optional() },
     run: async (roots, a) => {
-      const session = a.session_id ?? roots.store.getRun(resolveTrace(roots, a.trace_id))?.session_id;
-      if (!session) return { session_id: null, note: "This run has no session id. Agents set one with neatlogs.init(session_id=…) or the neatlogs.session.id attribute." };
+      // A run is only looked up without a session id; then the agent hears if the run in focus was deleted.
+      const resolved = a.session_id ? undefined : resolveTraceNoting(roots, a.trace_id);
+      const fellBack = resolved ? fallbackNote(resolved) : {};
+      const session = a.session_id ?? roots.store.getRun(resolved!.traceId)?.session_id;
+      if (!session) {
+        const why = "This run has no session id. Agents set one with neatlogs.init(session_id=…) or the neatlogs.session.id attribute.";
+        return { session_id: null, note: [fellBack.note, why].filter(Boolean).join(" ") };
+      }
       const runs = roots.store.listRuns({ sessionId: session, limit: 200 }).sort((x, y) => (x.started_ms ?? 0) - (y.started_ms ?? 0));
       return {
         session_id: session,
         turns: runs.map((r, i) => ({ turn: i + 1, trace_id: r.trace_id, status: r.status, input: clip(r.input_preview, 600), output: clip(r.output_preview, 600), open_problems: r.open_finding_count })),
+        ...fellBack,
       };
     },
   }),

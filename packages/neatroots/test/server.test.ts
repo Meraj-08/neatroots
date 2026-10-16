@@ -221,6 +221,19 @@ describe("server", () => {
     expect(ann.trace_id).toBe(latest);
     expect(ann.note).toContain("was deleted; using the latest run");
     expect(text(await client.callTool({ name: "get_run_outline", arguments: {} })).note).toBeUndefined();
+    // get_conversation defaults to the focus too, with or without a session on the run it falls back to.
+    tb.roots.focus = { trace_id: old, span_id: null, at: Date.now() };
+    const noSession = text(await client.callTool({ name: "get_conversation", arguments: {} }));
+    expect(noSession.session_id).toBeNull();
+    expect(noSession.note).toContain("was deleted; using the latest run");
+    expect(noSession.note).toContain("This run has no session id");
+    tb.roots.ingest([batch([span({ traceId: latest, spanId: hex(8), name: "turn", kind: "workflow", attrs: [s("neatlogs.session.id", "chat-1")] })])]);
+    tb.roots.focus = { trace_id: old, span_id: null, at: Date.now() };
+    const conversation = text(await client.callTool({ name: "get_conversation", arguments: {} }));
+    expect(conversation.session_id).toBe("chat-1");
+    expect(conversation.turns.map((t: { trace_id: string }) => t.trace_id)).toEqual([latest]);
+    expect(conversation.note).toContain("was deleted; using the latest run");
+    expect(tb.roots.focus).toBeNull();
     await client.close();
     // An id neatroots doesn't have is not taken as the focus.
     await call("/api/focus", { trace_id: hex(16) });

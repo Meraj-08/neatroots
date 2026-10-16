@@ -31,6 +31,7 @@ export function clip(s: string | null | undefined, n: number): string | null {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+/** The run an id names, else the run in focus, else the latest run. May clear roots.focus (see resolveTraceNoting). */
 export function resolveTrace(roots: Roots, id: string | undefined): string {
   return resolveTraceNoting(roots, id).traceId;
 }
