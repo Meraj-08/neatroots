@@ -181,6 +181,20 @@ describe("engine", () => {
     await tb.roots.engine!.waitIdle(t, 5000);
     expect(tb.roots.store.notesForTrace(t)).toEqual([]);
   });
+
+  it("cleans up idleWaiters when waitIdle times out", async () => {
+    const { tb } = await setup();
+    const t = hex(16);
+    let done!: () => void;
+    const job = new Promise<void>((r) => { done = r; });
+    (tb.roots.engine as any).track(t, job);
+
+    const ok = await tb.roots.engine!.waitIdle(t, 20);
+    expect(ok).toBe(false);
+    expect((tb.roots.engine as any).idleWaiters.has(t)).toBe(false);
+
+    done();
+  });
 });
 
 describe("planning", () => {
